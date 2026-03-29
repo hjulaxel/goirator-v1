@@ -8,24 +8,18 @@ using namespace std;
 using json = nlohmann::json;
 
 Rules::Rules() {
-  //Defaults if not set - closest match to TT rules
   koRule = KO_SIMPLE;
-  blackCapturesToWin = 5;
-  whiteCapturesToWin = 5;
-  multiStoneSuicideLegal = true;
+  connectToWin = 5;
   komi = 7.5f;
 }
 
 Rules::Rules(
   int kRule,
-  bool suic,
-  int capB,
-  int capW,
+  int connectWin,
   float km
 )
-  :koRule(kRule), 
-   blackCapturesToWin(capB), whiteCapturesToWin(capW), 
-   multiStoneSuicideLegal(suic), 
+  :koRule(kRule),
+   connectToWin(connectWin),
    komi(km)
 {}
 
@@ -35,9 +29,7 @@ Rules::~Rules() {
 bool Rules::operator==(const Rules& other) const {
   return
     koRule == other.koRule &&
-    multiStoneSuicideLegal == other.multiStoneSuicideLegal &&
-    blackCapturesToWin==other.blackCapturesToWin &&
-    whiteCapturesToWin==other.whiteCapturesToWin &&
+    connectToWin == other.connectToWin &&
     komi == other.komi;
 }
 
@@ -53,7 +45,6 @@ bool Rules::gameResultWillBeInteger() const {
 
 Rules Rules::getTrompTaylorish() {
   Rules rules = Rules();
-  rules.multiStoneSuicideLegal = true;
   return rules;
 }
 
@@ -76,10 +67,8 @@ string Rules::writeKoRule(int koRule) {
   return string("UNKNOWN");
 }
 ostream& operator<<(ostream& out, const Rules& rules) {
-  out << "ko" << Rules::writeKoRule(rules.koRule)
-      << "sui" << rules.multiStoneSuicideLegal;
-  out << "capb" << rules.blackCapturesToWin;
-  out << "capw" << rules.whiteCapturesToWin;
+  out << "ko" << Rules::writeKoRule(rules.koRule);
+  out << "conn" << rules.connectToWin;
   out << "komi" << rules.komi;
   return out;
 }
@@ -94,25 +83,18 @@ string Rules::toString() const {
 json Rules::toJson() const {
   json ret;
   ret["ko"] = writeKoRule(koRule);
-  ret["suicide"] = multiStoneSuicideLegal;
-  ret["capb"] = blackCapturesToWin;
-  ret["capw"] = whiteCapturesToWin;
+  ret["conn"] = connectToWin;
   ret["komi"] = komi;
   return ret;
 }
 
 Hash128 Rules::getRuleHashExceptKomi() const {
   Hash128 hash = Rules::ZOBRIST_KO_RULE_HASH[koRule];
-  if(multiStoneSuicideLegal)
-    hash ^= Rules::ZOBRIST_MULTI_STONE_SUICIDE_HASH;
-  assert(blackCapturesToWin > 0 && whiteCapturesToWin > 0);
-  hash ^= Hash128(
-    Hash::rrmxmx(blackCapturesToWin * ZOBRIST_BLACK_CAPTURENUM_RULE_HASH.hash0),
-    Hash::rrmxmx(blackCapturesToWin * ZOBRIST_BLACK_CAPTURENUM_RULE_HASH.hash1));
-  hash ^= Hash128(
-    Hash::rrmxmx(whiteCapturesToWin * ZOBRIST_WHITE_CAPTURENUM_RULE_HASH.hash0),
-    Hash::rrmxmx(whiteCapturesToWin * ZOBRIST_WHITE_CAPTURENUM_RULE_HASH.hash1));
-
+  if(connectToWin > 0) {
+    hash ^= Hash128(
+      Hash::rrmxmx(connectToWin * ZOBRIST_CONNECT_TO_WIN_HASH.hash0),
+      Hash::rrmxmx(connectToWin * ZOBRIST_CONNECT_TO_WIN_HASH.hash1));
+  }
   return hash;
 }
 
@@ -127,20 +109,11 @@ Rules Rules::updateRules(const string& k, const string& v, Rules oldRules) {
   string key = Global::trim(k);
   string value = Global::trim(Global::toUpper(v));
   if(key == "ko") rules.koRule = Rules::parseKoRule(value);
-  else if(key == "suicide")
-    rules.multiStoneSuicideLegal = Global::stringToBool(value);
-  else if(key == "capb" || key == "capw" || key == "cap") {
+  else if(key == "conn") {
     int va = Global::stringToInt(value);
-    if(va <= 0 || va > MAX_CAPTURE_TO_WIN)
-      throw IOError("Bad cap rules option: " + key + ". value should between 1 and" + to_string(MAX_CAPTURE_TO_WIN));
-    if(key == "capb")
-      rules.blackCapturesToWin = va;
-    else if(key == "capw")
-      rules.whiteCapturesToWin = va;
-    else {
-      rules.blackCapturesToWin = va;
-      rules.whiteCapturesToWin = va;
-    }
+    if(va < 0 || va > 19)
+      throw IOError("Bad conn rules option: value should be between 0 and 19");
+    rules.connectToWin = va;
   }
   else throw IOError("Unknown rules option: " + key);
   return rules;
@@ -149,14 +122,9 @@ Rules Rules::updateRules(const string& k, const string& v, Rules oldRules) {
 static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
   Rules rules = Rules();
   string lowercased = Global::trim(Global::toLower(sOrig));
-  if(lowercased == "chinese") {
+  if(lowercased == "chinese" || lowercased == "tromp-taylor" || lowercased == "tromp_taylor" ||
+     lowercased == "tromp taylor" || lowercased == "tromptaylor") {
     rules.koRule = Rules::KO_SIMPLE;
-    rules.multiStoneSuicideLegal = false;
-    rules.komi = 7.5;
-  }
-  else if(lowercased == "tromp-taylor" || lowercased == "tromp_taylor" || lowercased == "tromp taylor" || lowercased == "tromptaylor") {
-    rules.koRule = Rules::KO_SIMPLE;
-    rules.multiStoneSuicideLegal = true;
     rules.komi = 7.5;
   }
   else if(sOrig.length() > 0 && sOrig[0] == '{') {
@@ -164,33 +132,22 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
     rules = Rules::getTrompTaylorish();
     try {
       json input = json::parse(sOrig);
-      string s;
       for(json::iterator iter = input.begin(); iter != input.end(); ++iter) {
         string key = iter.key();
         if(key == "ko")
           rules.koRule = Rules::parseKoRule(iter.value().get<string>());
-        else if(key == "suicide")
-          rules.multiStoneSuicideLegal = iter.value().get<bool>();
         else if(key == "komi") {
           if(!allowKomi)
             throw IOError("Unknown rules option: " + key);
           rules.komi = iter.value().get<float>();
           if(rules.komi < Rules::MIN_USER_KOMI || rules.komi > Rules::MAX_USER_KOMI || !Rules::komiIsIntOrHalfInt(rules.komi))
             throw IOError("Komi value is not a half-integer or is too extreme");
-        } 
-        else if(key == "capb" || key == "capw" || key == "cap") {
+        }
+        else if(key == "conn") {
           int v = iter.value().get<int>();
-          if(v <= 0 || v > MAX_CAPTURE_TO_WIN)
-            throw IOError(
-              "Bad cap rules option: " + key + ". value should between 1 and" + to_string(MAX_CAPTURE_TO_WIN));
-          if(key == "capb")
-            rules.blackCapturesToWin = v;
-          else if(key == "capw")
-            rules.whiteCapturesToWin = v;
-          else {
-            rules.blackCapturesToWin = v;
-            rules.whiteCapturesToWin = v;
-          }
+          if(v < 0 || v > 19)
+            throw IOError("Bad conn rules option: value should be between 0 and 19");
+          rules.connectToWin = v;
         }
         else
           throw IOError("Unknown rules option: " + key);
@@ -201,7 +158,7 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
     }
   }
 
-  //This is more of a legacy internal format, not recommended for users to provide
+  //Legacy internal format
   else {
     auto startsWithAndStrip = [](string& str, const string& prefix) {
       bool matches = str.length() >= prefix.length() && str.substr(0,prefix.length()) == prefix;
@@ -211,13 +168,11 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
       return matches;
     };
 
-    //Default if not specified
     rules = Rules::getTrompTaylorish();
 
     string s = sOrig;
     s = Global::trim(s);
 
-    //But don't allow the empty string
     if(s.length() <= 0)
       throw IOError("Could not parse rules: " + sOrig);
 
@@ -242,7 +197,7 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
         s = Global::trim(s);
         continue;
       }
-      if(startsWithAndStrip(s, "capb")) {
+      if(startsWithAndStrip(s,"conn")) {
         int endIdx = 0;
         while(endIdx < s.length() && !Global::isAlpha(s[endIdx]) && !Global::isWhitespace(s[endIdx]))
           endIdx++;
@@ -250,37 +205,15 @@ static Rules parseRulesHelper(const string& sOrig, bool allowKomi) {
         bool suc = Global::tryStringToInt(s.substr(0, endIdx), v);
         if(!suc)
           throw IOError("Could not parse rules: " + sOrig);
-        if(v <= 0 || v > MAX_CAPTURE_TO_WIN)
-          throw IOError(
-            "Bad cap rules option. value should between 1 and" + to_string(MAX_CAPTURE_TO_WIN));
-        rules.blackCapturesToWin = v;
-        s = s.substr(endIdx);
-        s = Global::trim(s);
-        continue;
-      }
-      if(startsWithAndStrip(s, "capw")) {
-        int endIdx = 0;
-        while(endIdx < s.length() && !Global::isAlpha(s[endIdx]) && !Global::isWhitespace(s[endIdx]))
-          endIdx++;
-        int v;
-        bool suc = Global::tryStringToInt(s.substr(0, endIdx), v);
-        if(!suc)
-          throw IOError("Could not parse rules: " + sOrig);
-        if(v <= 0 || v > MAX_CAPTURE_TO_WIN)
-          throw IOError("Bad cap rules option. value should between 1 and" + to_string(MAX_CAPTURE_TO_WIN));
-        rules.whiteCapturesToWin = v;
+        if(v < 0 || v > 19)
+          throw IOError("Bad conn rules option: value should be between 0 and 19");
+        rules.connectToWin = v;
         s = s.substr(endIdx);
         s = Global::trim(s);
         continue;
       }
       if(startsWithAndStrip(s,"ko")) {
         if(startsWithAndStrip(s,"SIMPLE")) rules.koRule = Rules::KO_SIMPLE;
-        else throw IOError("Could not parse rules: " + sOrig);
-        continue;
-      }
-      if(startsWithAndStrip(s,"sui")) {
-        if(startsWithAndStrip(s,"1")) rules.multiStoneSuicideLegal = true;
-        else if(startsWithAndStrip(s,"0")) rules.multiStoneSuicideLegal = false;
         else throw IOError("Could not parse rules: " + sOrig);
         continue;
       }
@@ -311,11 +244,5 @@ const Hash128 Rules::ZOBRIST_KO_RULE_HASH[2] = {
   Hash128(0xcc18f5d47188554aULL, 0x3a63152c23e4128dULL),  //Based on sha256 hash of Rules::KO_POSITIONAL
 };
 
-const Hash128 Rules::ZOBRIST_BLACK_CAPTURENUM_RULE_HASH =  
-  Hash128(0x3bc55e42b23b35bfULL, 0xc75fa1e615621dcdULL);
-
-const Hash128 Rules::ZOBRIST_WHITE_CAPTURENUM_RULE_HASH =  
-  Hash128(0x5b2096e48241d21bULL, 0x23cc18d4e85cd67fULL);
-
-const Hash128 Rules::ZOBRIST_MULTI_STONE_SUICIDE_HASH =   //Based on sha256 hash of Rules::ZOBRIST_MULTI_STONE_SUICIDE_HASH
-  Hash128(0xf9b475b3bbf35e37ULL, 0xefa19d8b1e5b3e5aULL);
+const Hash128 Rules::ZOBRIST_CONNECT_TO_WIN_HASH =
+  Hash128(0xa7d3c1e8f4b25609ULL, 0x2e8f6a1d09c47b3eULL);

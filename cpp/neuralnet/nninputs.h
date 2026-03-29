@@ -55,12 +55,24 @@ namespace NNInputs {
   const int NUM_FEATURES_SPATIAL_V7 = 22;
   const int NUM_FEATURES_GLOBAL_V7 = 19;
 
+  //Gomoku V101: 22 spatial, 39 global (compatible with Gom2024 models)
+  const int NUM_FEATURES_SPATIAL_V101 = 22;
+  const int NUM_FEATURES_GLOBAL_V101 = 39;
+
   Hash128 getHash(
     const Board& board, const BoardHistory& boardHistory, Player nextPlayer,
     const MiscNNInputParams& nnInputParams
   );
 
   void fillRowV7(
+    const Board& board, const BoardHistory& boardHistory, Player nextPlayer,
+    const MiscNNInputParams& nnInputParams, int nnXLen, int nnYLen, bool useNHWC, float* rowBin, float* rowGlobal
+  );
+
+  //Simplified V101 for gomoku model compatibility.
+  //Fills basic spatial features (on-board, pla stone, opp stone).
+  //Gomoku-specific features (VCF, forbidden points, VC levels) are zeroed.
+  void fillRowV101(
     const Board& board, const BoardHistory& boardHistory, Player nextPlayer,
     const MiscNNInputParams& nnInputParams, int nnXLen, int nnYLen, bool useNHWC, float* rowBin, float* rowGlobal
   );

@@ -744,8 +744,10 @@ void NNEvaluator::evaluate(
     if(buf.rowMetaBuf.size() < rowMetaLen)
       buf.rowMetaBuf.resize(rowMetaLen);
 
-    static_assert(NNModelVersion::latestInputsVersionImplemented == 7, "");
-    if(inputsVersion == 7)
+    static_assert(NNModelVersion::latestInputsVersionImplemented == 101, "");
+    if(inputsVersion == 101)
+      NNInputs::fillRowV101(board, history, nextPlayer, nnInputParams, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatialBuf.data(), buf.rowGlobalBuf.data());
+    else if(inputsVersion == 7)
       NNInputs::fillRowV7(board, history, nextPlayer, nnInputParams, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatialBuf.data(), buf.rowGlobalBuf.data());
     else
       ASSERT_UNREACHABLE;

@@ -11,10 +11,7 @@ struct Rules {
   static const int KO_SIMPLE = 0;
   int koRule;
 
-  int blackCapturesToWin;  // if black get these much white captures, black win
-  int whiteCapturesToWin;  // if white get these much black captures, white win
-
-  bool multiStoneSuicideLegal;
+  int connectToWin;  // number of stones in a row to win (e.g. 5 for gomoku). 0 = disabled.
 
   float komi;
   //Min and max acceptable komi in various places involving user input validation
@@ -24,9 +21,7 @@ struct Rules {
   Rules();
   Rules(
     int koRule,
-    bool multiStoneSuicideLegal,
-    int capB,
-    int capW,
+    int connectWin,
     float komi
   );
   ~Rules();
@@ -56,9 +51,7 @@ struct Rules {
   Hash128 getRuleHashExceptKomi() const;
 
   static const Hash128 ZOBRIST_KO_RULE_HASH[2];
-  static const Hash128 ZOBRIST_BLACK_CAPTURENUM_RULE_HASH;
-  static const Hash128 ZOBRIST_WHITE_CAPTURENUM_RULE_HASH;
-  static const Hash128 ZOBRIST_MULTI_STONE_SUICIDE_HASH;
+  static const Hash128 ZOBRIST_CONNECT_TO_WIN_HASH;
 
 };
 

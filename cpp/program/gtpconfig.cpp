@@ -479,8 +479,7 @@ string GTPConfig::makeConfig(
   
   else { ASSERT_UNREACHABLE; }
 
-  if(rules.multiStoneSuicideLegal) replace("$$MULTI_STONE_SUICIDE", "multiStoneSuicideLegal = true");
-  else                             replace("$$MULTI_STONE_SUICIDE", "multiStoneSuicideLegal = false");
+  replace("$$MULTI_STONE_SUICIDE", "# multiStoneSuicideLegal removed - suicide is never legal");
 
 
   if(maxVisits < ((int64_t)1 << 50)) replace("$$MAX_VISITS", "maxVisits = " + Global::int64ToString(maxVisits));

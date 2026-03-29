@@ -118,13 +118,8 @@ class GameInitializer {
   Rand rand;
 
   std::vector<std::string> allowedKoRuleStrs;
-  std::vector<bool> allowedMultiStoneSuicideLegals;
 
   std::vector<int> allowedKoRules;
-
-  std::vector<std::pair<int, int>> allowedCaptureNums;
-  std::vector<double> allowedCaptureNumProbs;
-  double allowUnbalancedCaptureNumProb;
 
   std::vector<std::pair<int,int>> allowedBSizes;
   std::vector<double> allowedBSizeRelProbs;

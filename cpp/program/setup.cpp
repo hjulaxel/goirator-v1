@@ -731,17 +731,14 @@ Rules Setup::loadSingleRules(
 
   if(cfg.contains("rules")) {
     if(cfg.contains("koRule")) throw StringError("Cannot both specify 'rules' and individual rules like koRule");
-    if(cfg.contains("multiStoneSuicideLegal")) throw StringError("Cannot both specify 'rules' and individual rules like multiStoneSuicideLegal");
-    
+
     rules = Rules::parseRules(cfg.getString("rules"));
   }
   else {
     string koRule = cfg.getString("koRule", Rules::koRuleStrings());
-    bool multiStoneSuicideLegal = cfg.getBool("multiStoneSuicideLegal");
     float komi = 7.5f;
 
     rules.koRule = Rules::parseKoRule(koRule);
-    rules.multiStoneSuicideLegal = multiStoneSuicideLegal;
     rules.komi = komi;
 
   }
@@ -781,7 +778,7 @@ bool Setup::loadDefaultBoardXYSize(
 vector<pair<set<string>,set<string>>> Setup::getMutexKeySets() {
   vector<pair<set<string>,set<string>>> mutexKeySets = {
     std::make_pair<set<string>,set<string>>(
-    {"rules"},{"koRule","multiStoneSuicideLegal"}
+    {"rules"},{"koRule"}
     ),
   };
   return mutexKeySets;

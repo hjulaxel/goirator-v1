@@ -1087,7 +1087,7 @@ bool Connection::uploadTrainingGameAndData(
     int boardSizeY = gameData->startBoard.y_size;
     int handicap = gameData->handicapForSgf;
     double komi = gameData->startHist.rules.komi;
-    string rules = gameData->startHist.rules.toJsonStringNoKomiMaybeOmitStuff();
+    string rules = gameData->startHist.rules.toJsonString();
     json extraMetadata;
     extraMetadata["playout_doubling_advantage"] = gameData->playoutDoublingAdvantage;
     extraMetadata["playout_doubling_advantage_pla"] = PlayerIO::playerToString(gameData->playoutDoublingAdvantagePla);
@@ -1170,7 +1170,7 @@ bool Connection::uploadRatingGame(
     int boardSizeY = gameData->startBoard.y_size;
     int handicap = (gameData->numExtraBlack > 0 ? (gameData->numExtraBlack + 1) : 0);
     double komi = gameData->startHist.rules.komi;
-    string rules = gameData->startHist.rules.toJsonStringNoKomiMaybeOmitStuff();
+    string rules = gameData->startHist.rules.toJsonString();
     json extraMetadata = json({});
     string gametype = getGameTypeStr(gameData);
     string winner = gameData->endHist.winner == P_WHITE ? "W" : gameData->endHist.winner == P_BLACK ? "B" : gameData->endHist.isNoResult ? "-" : "0";

@@ -341,8 +341,8 @@ void TrainingWriteBuffers::addRow(
   SGFMetadata* sgfMeta,
   Rand& rand
 ) {
-  static_assert(NNModelVersion::latestInputsVersionImplemented == 7, "");
-  if(inputsVersion < 3 || inputsVersion > 7)
+  static_assert(NNModelVersion::latestInputsVersionImplemented == 101, "");
+  if((inputsVersion < 3 || inputsVersion > 7) && inputsVersion != 101)
     throw StringError("Training write buffers: Does not support input version: " + Global::intToString(inputsVersion));
 
   int posArea = dataXLen*dataYLen;
@@ -362,8 +362,13 @@ void TrainingWriteBuffers::addRow(
     bool inputsUseNHWC = false;
     float* rowBin = binaryInputNCHWUnpacked;
     float* rowGlobal = globalInputNC.data + curRows * numGlobalChannels;
-    static_assert(NNModelVersion::latestInputsVersionImplemented == 7, "");
-    if(inputsVersion == 7) {
+    static_assert(NNModelVersion::latestInputsVersionImplemented == 101, "");
+    if(inputsVersion == 101) {
+      assert(NNInputs::NUM_FEATURES_SPATIAL_V101 == numBinaryChannels);
+      assert(NNInputs::NUM_FEATURES_GLOBAL_V101 == numGlobalChannels);
+      NNInputs::fillRowV101(board, hist, nextPlayer, nnInputParams, dataXLen, dataYLen, inputsUseNHWC, rowBin, rowGlobal);
+    }
+    else if(inputsVersion == 7) {
       assert(NNInputs::NUM_FEATURES_SPATIAL_V7 == numBinaryChannels);
       assert(NNInputs::NUM_FEATURES_GLOBAL_V7 == numGlobalChannels);
       NNInputs::fillRowV7(board, hist, nextPlayer, nnInputParams, dataXLen, dataYLen, inputsUseNHWC, rowBin, rowGlobal);
@@ -782,7 +787,7 @@ TrainingDataWriter::TrainingDataWriter(const string& outDir, ostream* dbgOut, in
   int numGlobalChannels;
   //Note that this inputsVersion is for data writing, it might be different than the inputsVersion used
   //to feed into a model during selfplay
-  static_assert(NNModelVersion::latestInputsVersionImplemented == 7, "");
+  static_assert(NNModelVersion::latestInputsVersionImplemented == 101, "");
   if(inputsVersion == 7) {
     numBinaryChannels = NNInputs::NUM_FEATURES_SPATIAL_V7;
     numGlobalChannels = NNInputs::NUM_FEATURES_GLOBAL_V7;

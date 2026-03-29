@@ -1015,63 +1015,16 @@ void NNInputs::fillRowV7(
   if(selfKomi < -bArea-NNPos::KOMI_CLIP_RADIUS)
     selfKomi = -bArea-NNPos::KOMI_CLIP_RADIUS;
   
-  if (false) { //compat old models, you can use some tricks to enable it
-  //if (nnInputParams.nnPolicyTemperature == 1.125) { //compat for old version
-    rowGlobal[2] = selfKomi / 20.0f;
-
-    int myRemainCaptures = hist.requireCapturesToWin(board, pla);
-    int oppRemainCaptures = hist.requireCapturesToWin(board, opp);
-    if(myRemainCaptures <= 0)
-      std::cout << "myRemainCaptures" << myRemainCaptures;
-    if(oppRemainCaptures <= 0)
-      std::cout << "oppRemainCaptures" << oppRemainCaptures;
-    rowGlobal[3] = oppRemainCaptures / 5.0;
-    rowGlobal[4] = oppRemainCaptures >= 2;
-    rowGlobal[5] = oppRemainCaptures >= 3;
-    rowGlobal[6] = oppRemainCaptures >= 4;
-    rowGlobal[7] = oppRemainCaptures >= 5;
-    rowGlobal[8] = myRemainCaptures / 5.0;
-    rowGlobal[9] = myRemainCaptures >= 2;
-    rowGlobal[10] = myRemainCaptures >= 3;
-    rowGlobal[11] = myRemainCaptures >= 4;
-    rowGlobal[12] = myRemainCaptures >= 5;
-
-    // Ko rule
-    if(hist.rules.koRule == Rules::KO_SIMPLE) {
-    } else
-      ASSERT_UNREACHABLE;
-
-    rowGlobal[13] = hist.allowPass(board, pla);
-  } 
-  else {
+  {
     rowGlobal[0] = selfKomi / 20.0f;
 
-    static_assert(MAX_CAPTURE_TO_WIN == 5, "");
-    int myRemainCaptures = hist.requireCapturesToWin(board, pla);
-    int oppRemainCaptures = hist.requireCapturesToWin(board, opp);
-    rowGlobal[1] = oppRemainCaptures >= 2;
-    rowGlobal[2] = oppRemainCaptures >= 3;
-    rowGlobal[3] = oppRemainCaptures >= 4;
-    rowGlobal[4] = oppRemainCaptures >= 5;
-    rowGlobal[5] = myRemainCaptures >= 2;
-    rowGlobal[6] = myRemainCaptures >= 3;
-    rowGlobal[7] = myRemainCaptures >= 4;
-    rowGlobal[8] = myRemainCaptures >= 5;
-
     // Ko rule
     if(hist.rules.koRule == Rules::KO_SIMPLE) {
     } else
       ASSERT_UNREACHABLE;
 
-    rowGlobal[11] = hist.isOverpassedDraw(board, pla);
-    rowGlobal[12] = hist.isOverpassedDraw(board, opp);
-
-    rowGlobal[13] = hist.allowPass(board, pla);
-    rowGlobal[14] = hist.allowPass(board, opp);
-
-    // Suicide
-    if(hist.rules.multiStoneSuicideLegal)
-      rowGlobal[14] = 1.0f;
+    // Connect-to-win length
+    rowGlobal[1] = (float)hist.rules.connectToWin / 19.0f;
   }
 
   //Used for handicap play
@@ -1083,6 +1036,86 @@ void NNInputs::fillRowV7(
   }
 
   rowGlobal[18] = (xSize * ySize) % 2 == 0;
-  
 
+
+}
+
+//===========================================================================
+// V101 - Gomoku model compatibility
+// Fills basic spatial features and zeroes gomoku-specific features.
+// This allows loading Gom2024 models (version 101-103) for warm-start self-play.
+//===========================================================================
+
+void NNInputs::fillRowV101(
+  const Board& board,
+  const BoardHistory& hist,
+  Player nextPlayer,
+  const MiscNNInputParams& nnInputParams,
+  int nnXLen,
+  int nnYLen,
+  bool useNHWC,
+  float* rowBin,
+  float* rowGlobal) {
+  assert(nnXLen <= NNPos::MAX_BOARD_LEN);
+  assert(nnYLen <= NNPos::MAX_BOARD_LEN);
+  assert(board.x_size <= nnXLen);
+  assert(board.y_size <= nnYLen);
+  std::fill(rowBin, rowBin + NUM_FEATURES_SPATIAL_V101 * nnXLen * nnYLen, 0.0f);
+  std::fill(rowGlobal, rowGlobal + NUM_FEATURES_GLOBAL_V101, 0.0f);
+
+  Player pla = nextPlayer;
+  Player opp = getOpp(pla);
+  int xSize = board.x_size;
+  int ySize = board.y_size;
+
+  int featureStride;
+  int posStride;
+  if(useNHWC) {
+    featureStride = 1;
+    posStride = NNInputs::NUM_FEATURES_SPATIAL_V101;
+  } else {
+    featureStride = nnXLen * nnYLen;
+    posStride = 1;
+  }
+
+  // Spatial features
+  // 0: on-board
+  // 1: current player's stone
+  // 2: opponent's stone
+  // 3-4: forbidden points (Renju) - zeroed, not applicable
+  // 5: VCF winning move - zeroed, not computed
+  // 6-21: unused/zeroed
+
+  for(int y = 0; y < ySize; y++) {
+    for(int x = 0; x < xSize; x++) {
+      int pos = NNPos::xyToPos(x, y, nnXLen);
+      Loc loc = Location::getLoc(x, y, xSize);
+
+      // Feature 0 - on board
+      setRowBin(rowBin, pos, 0, 1.0f, posStride, featureStride);
+
+      Color stone = board.colors[loc];
+
+      // Features 1,2 - pla,opp stone
+      if(stone == pla)
+        setRowBin(rowBin, pos, 1, 1.0f, posStride, featureStride);
+      else if(stone == opp)
+        setRowBin(rowBin, pos, 2, 1.0f, posStride, featureStride);
+    }
+  }
+
+  // Global features
+  // Most gomoku-specific globals (VCF, VC levels, move limits, forbidden) are zeroed.
+  // We fill the basic ones that make sense for our game.
+
+  // 13: noResultUtilityForWhite (used in non-VCN mode)
+  rowGlobal[13] = nextPlayer == P_BLACK
+    ? -nnInputParams.drawEquivalentWinsForWhite
+    : nnInputParams.drawEquivalentWinsForWhite;
+
+  // 15,16: playout doubling advantage
+  if(nnInputParams.playoutDoublingAdvantage != 0) {
+    rowGlobal[15] = 1.0;
+    rowGlobal[16] = (float)(0.5 * nnInputParams.playoutDoublingAdvantage);
+  }
 }

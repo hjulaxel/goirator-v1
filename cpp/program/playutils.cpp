@@ -517,7 +517,6 @@ Rules PlayUtils::genRandomRules(Rand& rand) {
 
   Rules rules;
   rules.koRule = allowedKoRules[rand.nextUInt((uint32_t)allowedKoRules.size())];
-  rules.multiStoneSuicideLegal = rand.nextBool(0.5);
 
   return rules;
 }

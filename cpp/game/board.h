@@ -301,7 +301,14 @@ struct Board
 
   short adj_offsets[8]; //Indices 0-3: Offsets to add for adjacent points. Indices 4-7: Offsets for diagonal points. 2 and 3 are +x and +y.
 
+  //Check if placing a stone at loc creates a line of exactly connectLen or more stones for pla.
+  //Scans all 4 directions (horizontal, vertical, 2 diagonals).
+  bool checkConnectWin(Loc loc, Player pla, int connectLen) const;
+
   private:
+  //Count consecutive stones of pla in one direction from loc (not counting loc itself).
+  int connectionLengthOneDirection(Loc loc, Player pla, short adj) const;
+
   void init(int xS, int yS);
   int countHeuristicConnectionLibertiesX2(Loc loc, Player pla) const;
   bool isLibertyOf(Loc loc, Loc head) const;

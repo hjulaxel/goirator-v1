@@ -158,8 +158,6 @@ void BoardHistory::printBasicInfo(ostream& out, const Board& board) const {
   out << "Rules: " << rules.toJsonString() << endl;
   out << "B stones captured: " << board.numBlackCaptures << endl;
   out << "W stones captured: " << board.numWhiteCaptures << endl;
-  out << "B passed: " << board.numBlackPasses << endl;
-  out << "W passed: " << board.numWhitePasses << endl;
 }
 
 void BoardHistory::printDebugInfo(ostream& out, const Board& board) const {
@@ -175,50 +173,6 @@ void BoardHistory::printDebugInfo(ostream& out, const Board& board) const {
   out << endl;
 }
 
-int BoardHistory::requireCapturesToWin(const Board& board, Player pla) const {
-  int req = 0;
-  if(pla == C_BLACK)
-    req = rules.blackCapturesToWin - board.numWhiteCaptures;
-  else if(pla == C_WHITE)
-    req = rules.whiteCapturesToWin - board.numBlackCaptures;
-  if(req < 0)
-    req = 0;
-  if(req > MAX_CAPTURE_TO_WIN)
-    ASSERT_UNREACHABLE;
-  return req;
-}
-
-bool BoardHistory::allowPass(const Board& board, Player pla) const {
-  if(pla != allowPassSide())
-    return false;
-  float komi1 = rules.komi + board.numBlackPasses - board.numWhitePasses;
-  if(komi1 >= 0.75 && pla == C_WHITE)
-    return true;
-  if(komi1 <= 0.25 && pla == C_BLACK)
-    return true;
-  return false;
-}
-
-Color BoardHistory::allowPassSide() const {
-  assert(Rules::komiIsIntOrHalfInt(rules.komi));
-  if(rules.komi >= 0.75)
-    return C_WHITE;
-  if(rules.komi <= 0.25)
-    return C_BLACK;
-  return C_EMPTY;
-}
-
-bool BoardHistory::isOverpassedDraw(const Board& board, Player pla) const {
-  Color passSide = allowPassSide();
-  if(pla != passSide)
-    return false;
-  float komi1 = rules.komi + board.numBlackPasses - board.numWhitePasses;
-  if(passSide == C_WHITE && komi1 < 0.25)
-    return true;
-  if(passSide == C_BLACK && komi1 > 0.75)
-    return true;
-  return false;
-}
 
 const Board& BoardHistory::getRecentBoard(int numMovesAgo) const {
   assert(numMovesAgo >= 0 && numMovesAgo < NUM_RECENT_BOARDS);
@@ -244,7 +198,6 @@ float BoardHistory::whiteKomiAdjustmentForDraws(double drawEquivalentWinsForWhit
 
 float BoardHistory::currentSelfKomi(const Board& board, Player pla, double drawEquivalentWinsForWhite) const {
   float whiteKomiAdjusted = rules.komi + whiteKomiAdjustmentForDraws(drawEquivalentWinsForWhite);
-  whiteKomiAdjusted += (board.numBlackPasses - board.numWhitePasses);
   if(pla == P_WHITE)
     return whiteKomiAdjusted;
   else if(pla == P_BLACK)
@@ -265,35 +218,31 @@ void BoardHistory::endAndSetWinner(Color winner0, float whiteScore = 0.0) {
 }
 
 void BoardHistory::maybeEndGame(Board& board, Loc moveLoc, Player movePla) {
-  Color opp = getOpp(movePla);
-  if (moveLoc == Board::PASS_LOC) {
-    if(movePla != allowPassSide())
-      endAndSetWinner(opp);
-
-    float komi1 = rules.komi + board.numBlackPasses - board.numWhitePasses;
-    //pass too many times
-    if((komi1 < -0.25 && movePla == C_WHITE) || (komi1 > 1.25 && movePla == C_BLACK))
-      endAndSetWinner(opp);
+  //Check connect-to-win (e.g. 5-in-a-row) — the only win condition
+  if(moveLoc != Board::PASS_LOC && rules.connectToWin > 0) {
+    if(board.checkConnectWin(moveLoc, movePla, rules.connectToWin))
+      endAndSetWinner(movePla);
   }
 
-
-  int myReqCapture = requireCapturesToWin(board, movePla);
-  int oppReqCapture = requireCapturesToWin(board, getOpp(movePla));
-
-  if(myReqCapture <= 0) {
-    //if at the critical komi, draw rather than win
-    if(isOverpassedDraw(board, movePla)) 
+  //No legal moves for the next player — draw
+  if(!isGameFinished) {
+    Player nextPla = getOpp(movePla);
+    bool hasLegal = false;
+    for(int y = 0; y < board.y_size && !hasLegal; y++) {
+      for(int x = 0; x < board.x_size && !hasLegal; x++) {
+        Loc loc = Location::getLoc(x, y, board.x_size);
+        if(board.colors[loc] == C_EMPTY && board.isLegal(loc, nextPla, false))
+          hasLegal = true;
+      }
+    }
+    if(!hasLegal)
       endAndSetWinner(C_EMPTY);
-    else
-      endAndSetWinner(movePla);
-  } else if(oppReqCapture <= 0)
-    endAndSetWinner(opp);
+  }
 
   // Break long cycles with no-result
-  if(moveHistory.size() > board.x_size * board.y_size * 5) {
+  if(!isGameFinished && moveHistory.size() > (size_t)(board.x_size * board.y_size * 5)) {
     isNoResult = true;
     isGameFinished = true;
-    ASSERT_UNREACHABLE;
   }
 }
 
@@ -313,16 +262,14 @@ void BoardHistory::setWinnerByResignation(Player pla) {
 }
 
 bool BoardHistory::isLegal(const Board& board, Loc moveLoc, Player movePla) const {
-  //Ko-moves in the encore that are recapture blocked are interpreted as pass-for-ko, so they are legal
-  {
-    //Only check ko bans during normal play.
-    //Ko mechanics in the encore are totally different, we ignore simple ko loc.
-    if(board.isKoBanned(moveLoc))
-      return false;
-  }
-  if(!board.isLegalIgnoringKo(moveLoc,movePla,rules.multiStoneSuicideLegal))
+  //No passing allowed
+  if(moveLoc == Board::PASS_LOC)
     return false;
-
+  if(board.isKoBanned(moveLoc))
+    return false;
+  //Suicide is never legal
+  if(!board.isLegalIgnoringKo(moveLoc,movePla,false))
+    return false;
   return true;
 }
 

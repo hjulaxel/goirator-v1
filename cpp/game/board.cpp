@@ -2423,3 +2423,33 @@ bool Board::simpleRepetitionBoundGt(Loc loc, int bound) const {
 
   return false;
 }
+
+//------- Connection / N-in-a-row detection -------
+
+int Board::connectionLengthOneDirection(Loc loc, Player pla, short adj) const {
+  Loc cur = loc;
+  int count = 0;
+  while(true) {
+    cur += adj;
+    if(!isOnBoard(cur)) break;
+    if(colors[cur] != pla) break;
+    count++;
+  }
+  return count;
+}
+
+bool Board::checkConnectWin(Loc loc, Player pla, int connectLen) const {
+  if(connectLen <= 0) return false;
+  //Check 4 directions: horizontal, vertical, and 2 diagonals
+  //adj_offsets[0..3] = orthogonal, [4..7] = diagonal
+  //Direction pairs: (0,3), (1,2), (4,7), (5,6)
+  static const int dirPairs[4][2] = {{0,3},{1,2},{4,7},{5,6}};
+  for(int d = 0; d < 4; d++) {
+    int len = 1
+      + connectionLengthOneDirection(loc, pla, adj_offsets[dirPairs[d][0]])
+      + connectionLengthOneDirection(loc, pla, adj_offsets[dirPairs[d][1]]);
+    if(len >= connectLen)
+      return true;
+  }
+  return false;
+}

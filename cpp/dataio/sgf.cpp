@@ -713,7 +713,7 @@ void Sgf::iterAllUniquePositions(
   if(nextPla == C_EMPTY)
     nextPla = C_BLACK;
   Rules rules = Rules::getTrompTaylorish();
-  rules.multiStoneSuicideLegal = true;
+
   BoardHistory hist(board,nextPla,rules);
 
   PositionSample sampleBuf;
@@ -739,7 +739,7 @@ void Sgf::iterAllPositions(
   if(nextPla == C_EMPTY)
     nextPla = C_BLACK;
   Rules rules = Rules::getTrompTaylorish();
-  rules.multiStoneSuicideLegal = true;
+
   BoardHistory hist(board,nextPla,rules);
 
   PositionSample sampleBuf;

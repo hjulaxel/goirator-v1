@@ -62,36 +62,16 @@ GameInitializer::GameInitializer(ConfigParser& cfg, Logger& logger, const string
 {
   initShared(cfg,logger);
 }
-//if capb!=capw, komi mean should be changed
-//this value should be tuned after some training
-static_assert(MAX_CAPTURE_TO_WIN == 5, "the following matrix should be changed");
-//tested on 13x13 board.
-//komiBias=x*area*(2/169)
-const double komiBiasAreaFactor[MAX_CAPTURE_TO_WIN][MAX_CAPTURE_TO_WIN] = {
-  {0, 38, 68, 99, 120},
-  {-38, 0, 19, 36, 51},
-  {-68, -19, 0, 14, 25},
-  {-99, -36, -14, 0, 9},
-  {-120, -51, -25, -9, 0},
-};
-static const double komiMeanBiasCap(int capb,int capw,int boardH,int boardW){
-  double area = boardH * boardW;
-
-  return area * (0.5 / 169.0) * komiBiasAreaFactor[capb - 1][capw - 1];
-}
 
 void GameInitializer::initShared(ConfigParser& cfg, Logger& logger) {
 
   allowedKoRuleStrs = cfg.getStrings("koRules", Rules::koRuleStrings());
-  allowedMultiStoneSuicideLegals = cfg.getBools("multiStoneSuicideLegals");
 
   for(size_t i = 0; i < allowedKoRuleStrs.size(); i++)
     allowedKoRules.push_back(Rules::parseKoRule(allowedKoRuleStrs[i]));
 
   if(allowedKoRules.size() <= 0)
     throw IOError("koRules must have at least one value in " + cfg.getFileName());
-  if(allowedMultiStoneSuicideLegals.size() <= 0)
-    throw IOError("multiStoneSuicideLegals must have at least one value in " + cfg.getFileName());
   
 
   if(cfg.contains("bSizes") == cfg.contains("bSizesXY"))
@@ -149,47 +129,6 @@ void GameInitializer::initShared(ConfigParser& cfg, Logger& logger) {
       throw IOError("bSizeRelProbs must sum to a positive value");
   }
 
-  if(cfg.contains("allowedCaptureNums")) {
-    std::vector<int> allowedEdges = cfg.getInts("allowedCaptureNums", 1, MAX_CAPTURE_TO_WIN);
-    std::vector<double> allowedEdgeRelProbs = cfg.getDoubles("allowedCaptureNumProbs", 0.0, 1e100);
-    double relProbSum = 0.0;
-    for(const double p: allowedEdgeRelProbs)
-      relProbSum += p;
-    if(relProbSum <= 1e-100)
-      throw IOError("bSizeRelProbs must sum to a positive value");
-    allowUnbalancedCaptureNumProb =
-      cfg.contains("allowUnbalancedCaptureNumProb") ? cfg.getDouble("allowUnbalancedCaptureNumProb", 0.0, 1.0) : 0.0;
-
-    if(allowedEdges.size() <= 0)
-      throw IOError("allowedCaptureNums must have at least one value in " + cfg.getFileName());
-    if(allowedEdges.size() != allowedEdgeRelProbs.size())
-      throw IOError("allowedCaptureNums and allowedCaptureNumProbs must have same number of values in " + cfg.getFileName());
-
-    allowedCaptureNums.clear();
-    allowedCaptureNumProbs.clear();
-    for(int i = 0; i < (int)allowedEdges.size(); i++) {
-      for(int j = 0; j < (int)allowedEdges.size(); j++) {
-        int x = allowedEdges[i];
-        int y = allowedEdges[j];
-        if(x == y) {
-          allowedCaptureNums.push_back(std::make_pair(x, y));
-          allowedCaptureNumProbs.push_back(
-            (1.0 - allowUnbalancedCaptureNumProb) * allowedEdgeRelProbs[i] / relProbSum +
-            allowUnbalancedCaptureNumProb * allowedEdgeRelProbs[i] * allowedEdgeRelProbs[j] / relProbSum /
-              relProbSum);
-        } else {
-          if(allowUnbalancedCaptureNumProb > 0.0) {
-            allowedCaptureNums.push_back(std::make_pair(x, y));
-            allowedCaptureNumProbs.push_back(
-              allowUnbalancedCaptureNumProb * allowedEdgeRelProbs[i] * allowedEdgeRelProbs[j] / relProbSum /
-              relProbSum);
-          }
-        }
-      }
-    }
-  } 
-  else
-    throw IOError("Must specify allowedCaptureNums in config");
 
   if(!cfg.contains("komiMean"))
     throw IOError("Must specify komiMean=<komi value> in config");
@@ -356,8 +295,6 @@ void GameInitializer::initShared(ConfigParser& cfg, Logger& logger) {
     throw IOError("bSizes or bSizesXY must have at least one value in " + cfg.getFileName());
   if(allowedBSizes.size() != allowedBSizeRelProbs.size())
     throw IOError("bSizes or bSizesXY and bSizeRelProbs must have same number of values in " + cfg.getFileName());
-  if(allowedCaptureNums.size() != allowedCaptureNumProbs.size())
-    throw IOError("allowedCaptureNums and allowedCaptureNumProbs must have same number of values in " + cfg.getFileName());
 
   minBoardXSize = allowedBSizes[0].first;
   minBoardYSize = allowedBSizes[0].second;
@@ -455,12 +392,6 @@ Rules GameInitializer::createRules() {
 Rules GameInitializer::createRulesUnsynchronized() {
   Rules rules;
   rules.koRule = allowedKoRules[rand.nextUInt((uint32_t)allowedKoRules.size())];
-  rules.multiStoneSuicideLegal = allowedMultiStoneSuicideLegals[rand.nextUInt((uint32_t)allowedMultiStoneSuicideLegals.size())];
-
-  int captureRuleIdx = rand.nextUInt(allowedCaptureNumProbs.data(), allowedCaptureNumProbs.size());
-  rules.blackCapturesToWin = allowedCaptureNums[captureRuleIdx].first;
-  rules.whiteCapturesToWin = allowedCaptureNums[captureRuleIdx].second;
-
   return rules;
 }
 
@@ -589,8 +520,7 @@ void GameInitializer::createGameSharedUnsynchronized(
     }
 
     hist.clear(board,pla,rules);
-    float komiMean1 =
-      komiMean + komiMeanBiasCap(rules.blackCapturesToWin, rules.whiteCapturesToWin, board.y_size, board.x_size);
+    float komiMean1 = komiMean;
     komiMean1 += 2 * komiMean * (board.numPlaStonesOnBoard(C_BLACK) - board.numPlaStonesOnBoard(C_WHITE));
     hist.setKomi(getRandomKomi(board.x_size * board.y_size, komiMean1));
 
