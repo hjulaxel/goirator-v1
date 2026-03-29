@@ -50,6 +50,9 @@ test.txt
 cpp/tmp
 out.txt
 
+# Secrets
+.env
+
 # For clion IDE
 .idea
 
