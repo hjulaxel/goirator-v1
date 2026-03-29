@@ -7,11 +7,12 @@ Prerequisites:
   export RUNPOD_API_KEY=your_key
 
 Usage:
-  python runpod_launch.py                    # RTX 4090, 1 GPU
-  python runpod_launch.py --gpu "A100"       # A100 80GB
-  python runpod_launch.py --stop             # Stop running pod
-  python runpod_launch.py --resume           # Resume stopped pod
-  python runpod_launch.py --status           # Check pod status
+  python runpod_launch.py                          # RTX 4090, 1 GPU
+  python runpod_launch.py --gpu "A100"             # A100 80GB
+  python runpod_launch.py --network-volume VOL_ID  # Use persistent network volume
+  python runpod_launch.py --stop                   # Stop running pod (data preserved)
+  python runpod_launch.py --resume                 # Resume stopped pod
+  python runpod_launch.py --status                 # Check pod status
 """
 
 import argparse
@@ -71,13 +72,12 @@ def cmd_launch(args):
     print(f"GPU: {gpu_type}")
     print(f"Image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04")
 
-    pod = runpod.create_pod(
+    create_kwargs = dict(
         name=POD_NAME,
         image_name="runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
         gpu_type_id=gpu_type,
         gpu_count=1,
         cloud_type="ALL",
-        volume_in_gb=200,
         container_disk_in_gb=20,
         volume_mount_path="/workspace",
         min_vcpu_count=4,
@@ -87,6 +87,17 @@ def cmd_launch(args):
         start_ssh=True,
         docker_args=SETUP_CMD,
     )
+
+    if args.network_volume:
+        create_kwargs["network_volume_id"] = args.network_volume
+        print(f"Network volume: {args.network_volume} (data persists across pod termination)")
+    else:
+        create_kwargs["volume_in_gb"] = 200
+        print("Using ephemeral 200GB volume (data lost on pod termination)")
+        print("  Tip: create a network volume at https://www.runpod.io/console/user/storage")
+        print("  Then pass --network-volume VOL_ID for persistent storage")
+
+    pod = runpod.create_pod(**create_kwargs)
 
     print(f"\nPod created: id={pod['id']}")
     print(f"SSH will be available once the pod starts.")
@@ -110,7 +121,7 @@ def cmd_resume(args):
     if not pod:
         print(f"No pod named '{POD_NAME}' found.")
         return
-    runpod.resume_pod(pod["id"])
+    runpod.resume_pod(pod["id"], gpu_count=1)
     print(f"Resumed pod {pod['id']}.")
 
 
@@ -142,6 +153,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Launch Goirator training on RunPod")
     parser.add_argument("--gpu", default="4090", help=f"GPU type: {', '.join(GPU_TYPES.keys())} (default: 4090)")
+    parser.add_argument("--network-volume", help="Network volume ID for persistent storage (recommended)")
     parser.add_argument("--stop", action="store_true", help="Stop the running pod")
     parser.add_argument("--resume", action="store_true", help="Resume a stopped pod")
     parser.add_argument("--status", action="store_true", help="Check pod status")
