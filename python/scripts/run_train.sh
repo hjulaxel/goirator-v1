@@ -59,7 +59,8 @@ while true; do
     echo "[2/4] Shuffling training data..."
     cd /workspace/goirator-v1/python
     bash selfplay/shuffle.sh "$BASEDIR" "$TMPDIR" 4 "$BATCH_SIZE" \
-        -keep-target-rows 1200000
+        -keep-target-rows 1200000 \
+        -min-rows 100000
 
     # 3. Train
     echo "[3/4] Training neural network..."
