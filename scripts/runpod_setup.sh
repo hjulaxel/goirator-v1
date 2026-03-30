@@ -60,17 +60,17 @@ fi
 
 echo ""
 echo "=== Setup Complete ==="
+
+# Auto-start training (runs detached, survives terminal disconnect)
 echo ""
-echo "To start training:"
-echo "  cd /workspace/goirator-v1/python/scripts"
-echo "  bash run_train.sh 1    # for 1 GPU"
-echo "  bash run_train.sh 2    # for 2 GPUs"
+echo "Starting training automatically..."
+cd /workspace/goirator-v1/python/scripts
+bash run_train.sh 1
+
 echo ""
-echo "To use the gomoku model instead (partial feature compatibility):"
-echo "  cd /workspace/models"
-echo "  curl -sLO https://github.com/hzyhhzy/KataGomo/releases/download/Gomoku_20250206/zhizi_renju28b_s1600.bin.gz"
-echo "  cp zhizi_renju28b_s1600.bin.gz model.bin.gz"
+echo "Training is running in the background."
+echo "Monitor with: tail -f /workspace/data/run_train.log"
+echo "Training progress: tail -20 /workspace/data/train/goirator/stdout.txt"
 echo ""
-echo "To merge models:"
-echo "  cd /workspace/goirator-v1/python"
-echo "  python3 warmstart.py merge /workspace/models/capturego_19x_b18.bin.gz /workspace/models/other.bin.gz -o /workspace/models/model.bin.gz"
+echo "To stop: kill \$(cat /workspace/data/run_train.pid 2>/dev/null || pgrep -f run_train)"
+echo "To restart: cd /workspace/goirator-v1/python/scripts && bash run_train.sh 1"

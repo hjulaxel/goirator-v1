@@ -2,8 +2,22 @@
 # Goirator training loop for RunPod
 # Usage: bash run_train.sh [NUM_GPUS]
 #
+# Automatically runs detached (via nohup) so it survives terminal disconnects.
+# Log: /workspace/data/run_train.log
+#
 # This runs on a RunPod pod with the repo cloned to /workspace/goirator-v1
 # and the warm-start model at /workspace/models/model.bin.gz
+
+# Auto-detach: if not already running under nohup, re-exec with nohup
+if [ -z "${GOIRATOR_NOHUP:-}" ]; then
+    export GOIRATOR_NOHUP=1
+    mkdir -p /workspace/data
+    echo "Training launched in background. Monitor with:"
+    echo "  tail -f /workspace/data/run_train.log"
+    nohup bash "$0" "$@" > /workspace/data/run_train.log 2>&1 &
+    echo "PID: $!"
+    exit 0
+fi
 
 NUM_GPUS="${1:-1}"
 BASEDIR="/workspace/data"
