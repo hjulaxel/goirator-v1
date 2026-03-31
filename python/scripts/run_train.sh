@@ -76,11 +76,14 @@ while true; do
         -keep-target-rows 1200000 \
         -min-rows 100000
 
-    # 3. Train
+    # 3. Train (limited to ~10 epochs on current data, then exit for next generation)
     echo "[3/4] Training neural network..."
     CUDA_VISIBLE_DEVICES="$GPU_LIST" bash selfplay/train.sh \
         "$BASEDIR" "$MODEL_NAME" "$MODEL_KIND" "$BATCH_SIZE" main \
         -samples-per-epoch 1000000 \
+        -max-train-steps-since-last-reload 10000000 \
+        -stop-when-train-bucket-limited \
+        -quit-if-no-data \
         -lr-scale 2.0 \
         -pos-len 15
 
