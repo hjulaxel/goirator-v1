@@ -834,6 +834,12 @@ def main(rank: int, world_size: int, args, multi_gpu_device_ids, readpipes, writ
             else:
                 if max_train_steps_since_last_reload is not None:
                     if train_state["train_steps_since_last_reload"] + 0.99 * samples_per_epoch/sub_epochs > max_train_steps_since_last_reload:
+                        if stop_when_train_bucket_limited:
+                            logging.info(
+                                "Too many train steps since last reload, terminating (current %f)" %
+                                train_state["train_steps_since_last_reload"]
+                            )
+                            return
                         logging.info(
                             "Too many train steps since last reload, waiting 5m and retrying (current %f)" %
                             train_state["train_steps_since_last_reload"]
