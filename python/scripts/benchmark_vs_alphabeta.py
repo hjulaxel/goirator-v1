@@ -3,7 +3,8 @@
 Benchmark a KataGo (goirator) model against the Alpha-Beta player from go-in-row.
 
 Plays N games via a GTP bridge, alternating colors each game for fairness.
-Reports win/loss stats per generation.
+Reports win/loss stats overall and per-color to separate model strength
+from first-player advantage.
 
 Usage:
     python benchmark_vs_alphabeta.py \
@@ -11,7 +12,7 @@ Usage:
         --model  /path/to/model.bin.gz \
         --config /path/to/gtp_benchmark.cfg \
         --go-in-row /path/to/go-in-row \
-        --games 10 --board-size 15
+        --games 20 --board-size 15
 """
 
 import argparse
@@ -141,7 +142,7 @@ def main():
     ap.add_argument("--model", required=True, help="Path to model .bin.gz")
     ap.add_argument("--config", required=True, help="Path to GTP config file")
     ap.add_argument("--go-in-row", required=True, help="Path to go-in-row repo root")
-    ap.add_argument("--games", type=int, default=10)
+    ap.add_argument("--games", type=int, default=20)
     ap.add_argument("--board-size", type=int, default=15)
     ap.add_argument("--ab-depth", type=int, default=4, help="Alpha-beta search depth")
     ap.add_argument("--ab-time", type=float, default=5.0, help="Alpha-beta time limit (s)")
@@ -167,8 +168,11 @@ def main():
 
     ab = AlphaBetaPlayer(depth=args.ab_depth, max_time=args.ab_time)
 
-    katago_wins = 0
-    ab_wins = 0
+    # Per-color tracking
+    katago_wins_as_B = 0
+    katago_wins_as_W = 0
+    games_as_B = 0
+    games_as_W = 0
     draws = 0
 
     gen_label = f"gen {args.generation}" if args.generation >= 0 else "baseline"
@@ -186,22 +190,36 @@ def main():
         elapsed = time.time() - t0
 
         if result == "katago":
-            katago_wins += 1
+            if katago_color == "B":
+                katago_wins_as_B += 1
+            else:
+                katago_wins_as_W += 1
             print(f"KataGo wins  ({elapsed:.0f}s)")
         elif result == "alphabeta":
-            ab_wins += 1
             print(f"Alpha-Beta wins  ({elapsed:.0f}s)")
         else:
             draws += 1
             print(f"Draw  ({elapsed:.0f}s)")
 
+        if katago_color == "B":
+            games_as_B += 1
+        else:
+            games_as_W += 1
+
     engine.close()
 
-    winrate = katago_wins / args.games * 100 if args.games > 0 else 0
+    total_katago = katago_wins_as_B + katago_wins_as_W
+    total_games = args.games
+    winrate = total_katago / total_games * 100 if total_games > 0 else 0
+    wr_as_B = katago_wins_as_B / games_as_B * 100 if games_as_B > 0 else 0
+    wr_as_W = katago_wins_as_W / games_as_W * 100 if games_as_W > 0 else 0
+
     print("=" * 60)
     print(f"[benchmark] {gen_label} result: "
-          f"KataGo {katago_wins} - {ab_wins} Alpha-Beta "
+          f"KataGo {total_katago} - {total_games - total_katago - draws} Alpha-Beta "
           f"({draws} draws)  winrate={winrate:.0f}%")
+    print(f"[benchmark]   as Black: {katago_wins_as_B}/{games_as_B} ({wr_as_B:.0f}%)  "
+          f"as White: {katago_wins_as_W}/{games_as_W} ({wr_as_W:.0f}%)")
     print("=" * 60)
     return 0
 

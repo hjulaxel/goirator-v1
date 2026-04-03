@@ -33,7 +33,7 @@ MODEL_NAME="goirator"
 MODEL_KIND="b10c384nbt-fson-mish-rvglr-bnh"
 BATCH_SIZE=128
 SELFPLAY_GAMES=10000
-BENCHMARK_GAMES=10
+BENCHMARK_GAMES=20
 
 # Create directory structure
 mkdir -p "$BASEDIR"/{selfplay,models,shuffleddata}
