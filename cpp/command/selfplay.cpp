@@ -110,6 +110,12 @@ int MainCmds::selfplay(const vector<string>& args) {
   //Initialize object for randomizing game settings and running games
   PlaySettings playSettings = PlaySettings::loadForSelfplay(cfg);
   GameRunner* gameRunner = new GameRunner(cfg, playSettings, logger);
+
+  //External opponent settings (disabled by default)
+  const string externalOpponentCmd = cfg.contains("externalOpponentCmd") ? cfg.getString("externalOpponentCmd") : "";
+  const double externalOpponentProb = cfg.contains("externalOpponentProb") ? cfg.getDouble("externalOpponentProb", 0.0, 1.0) : 0.0;
+  if(externalOpponentCmd.size() > 0 && externalOpponentProb > 0.0)
+    logger.write("External opponent enabled: prob=" + Global::doubleToString(externalOpponentProb) + " cmd=" + externalOpponentCmd);
   bool autoCleanupAllButLatestIfUnused = true;
   SelfplayManager* manager = new SelfplayManager(maxDataQueueSize, &logger, logGamesEvery, autoCleanupAllButLatestIfUnused);
 
@@ -246,7 +252,9 @@ int MainCmds::selfplay(const vector<string>& args) {
     &forkData,
     maxGamesTotal,
     &baseParams,
-    &gameSeedBase
+    &gameSeedBase,
+    &externalOpponentCmd,
+    externalOpponentProb
   ](int threadIdx) {
     auto shouldStopFunc = []() {
       return shouldStop.load();
@@ -298,14 +306,29 @@ int MainCmds::selfplay(const vector<string>& args) {
         MatchPairer::BotSpec botSpecW = botSpecB;
 
         string seed = gameSeedBase + ":" + Global::uint64ToHexString(thisLoopSeedRand.nextUInt64());
+
+        //Decide whether this game uses an external opponent
+        ExternalPlayer* extPlayer = nullptr;
+        Player extPla = C_EMPTY;
+        if(externalOpponentCmd.size() > 0 && externalOpponentProb > 0.0 &&
+           thisLoopSeedRand.nextDouble() < externalOpponentProb) {
+          extPlayer = new ExternalPlayer(externalOpponentCmd, logger);
+          //Randomly assign external player to Black or White
+          extPla = thisLoopSeedRand.nextBool(0.5) ? P_BLACK : P_WHITE;
+        }
+
         gameData = gameRunner->runGame(
           seed, botSpecB, botSpecW, forkData, NULL, logger,
           shouldStopFunc,
           shouldPause,
           (switchNetsMidGame ? checkForNewNNEval : nullptr),
           nullptr,
-          nullptr
+          nullptr,
+          extPlayer,
+          extPla
         );
+
+        delete extPlayer;
       }
 
       //NULL gamedata will happen when the game is interrupted by shouldStop, which means we should also stop.

@@ -1126,7 +1126,7 @@ static Loc runBotWithLimits(
 
 
 FinishedGameData* Play::runGame(
-  const Board& startBoard, Player startPla, const BoardHistory& startHist, 
+  const Board& startBoard, Player startPla, const BoardHistory& startHist,
   MatchPairer::BotSpec& botSpecB, MatchPairer::BotSpec& botSpecW,
   Search* botB, Search* botW,
   bool clearBotBeforeSearch,
@@ -1136,7 +1136,9 @@ FinishedGameData* Play::runGame(
   const PlaySettings& playSettings, const OtherGameProperties& otherGameProps,
   Rand& gameRand,
   std::function<NNEvaluator*()> checkForNewNNEval,
-  std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove
+  std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove,
+  ExternalPlayer* externalPlayer,
+  Player externalPla
 ) {
   FinishedGameData* gameData = new FinishedGameData();
 
@@ -1262,106 +1264,141 @@ FinishedGameData* Play::runGame(
       toMoveBot->setKomiIfNew((float)(plaFactor * currentKomiBonus + hist.rules.komi));
     }
 
-    SearchLimitsThisMove limits = getSearchLimitsThisMove(
-      toMoveBot, pla, playSettings, gameRand, historicalMctsWinLossValues, clearBotBeforeSearch, otherGameProps
-    );
+    //── External opponent turn vs MCTS turn ──────────────────────────
+    bool isExternalTurn = (externalPlayer != nullptr && pla == externalPla);
+
     Loc loc;
-    if(playSettings.recordTimePerMove) {
-      double t0 = timer.getSeconds();
-      loc = runBotWithLimits(toMoveBot, pla, playSettings, limits);
-      double t1 = timer.getSeconds();
+
+    if(isExternalTurn) {
+      //Get move from external subprocess instead of MCTS
+      loc = externalPlayer->getMove(pla, board);
+      if(loc == Board::NULL_LOC || (loc != Board::PASS_LOC && !hist.isLegal(board, loc, pla))) {
+        //External player returned illegal move — discard this game
+        logger.write("ExternalPlayer returned illegal move, discarding game");
+        delete gameData;
+        return NULL;
+      }
+
+      if(pla == P_BLACK) gameData->bMoveCount += 1;
+      else gameData->wMoveCount += 1;
+
+      if(logMoves)
+        logger.write("ExtMove " + Global::uint64ToString(hist.moveHistory.size()) + " made: " + Location::toString(loc,board));
+
+      //Push zero-weight dummy training data so vectors stay aligned
+      gameData->whiteValueTargetsByTurn.push_back(ValueTargets());
+      if(!recordFullData) {
+        gameData->policyTargetsByTurn.push_back(PolicyTarget(NULL, 0));
+      }
+      else {
+        gameData->policyTargetsByTurn.push_back(PolicyTarget(new vector<PolicyTargetMove>(), 0));
+        gameData->nnRawStatsByTurn.push_back(NNRawStats());
+        gameData->targetWeightByTurn.push_back(0.0);
+        gameData->policySurpriseByTurn.push_back(0.0);
+        gameData->policyEntropyByTurn.push_back(0.0);
+        gameData->searchEntropyByTurn.push_back(0.0);
+        rawNNValues.push_back(ReportedSearchValues());
+      }
+    }
+    else {
+      //── Normal MCTS turn (existing code, unchanged) ──────────────
+      SearchLimitsThisMove limits = getSearchLimitsThisMove(
+        toMoveBot, pla, playSettings, gameRand, historicalMctsWinLossValues, clearBotBeforeSearch, otherGameProps
+      );
+      if(playSettings.recordTimePerMove) {
+        double t0 = timer.getSeconds();
+        loc = runBotWithLimits(toMoveBot, pla, playSettings, limits);
+        double t1 = timer.getSeconds();
+        if(pla == P_BLACK)
+          gameData->bTimeUsed += t1-t0;
+        else
+          gameData->wTimeUsed += t1-t0;
+      }
+      else {
+        loc = runBotWithLimits(toMoveBot, pla, playSettings, limits);
+      }
+
       if(pla == P_BLACK)
-        gameData->bTimeUsed += t1-t0;
+        gameData->bMoveCount += 1;
       else
-        gameData->wTimeUsed += t1-t0;
-    }
-    else {
-      loc = runBotWithLimits(toMoveBot, pla, playSettings, limits);
-    }
+        gameData->wMoveCount += 1;
 
-    if(pla == P_BLACK)
-      gameData->bMoveCount += 1;
-    else
-      gameData->wMoveCount += 1;
+      if(loc == Board::NULL_LOC || !toMoveBot->isLegalStrict(loc,pla))
+        failIllegalMove(toMoveBot,logger,board,loc);
+      if(logSearchInfo)
+        logSearch(toMoveBot,logger,loc,otherGameProps);
+      if(logMoves)
+        logger.write("Move " + Global::uint64ToString(hist.moveHistory.size()) + " made: " + Location::toString(loc,board));
 
-    if(loc == Board::NULL_LOC || !toMoveBot->isLegalStrict(loc,pla))
-      failIllegalMove(toMoveBot,logger,board,loc);
-    if(logSearchInfo)
-      logSearch(toMoveBot,logger,loc,otherGameProps);
-    if(logMoves)
-      logger.write("Move " + Global::uint64ToString(hist.moveHistory.size()) + " made: " + Location::toString(loc,board));
+      ValueTargets whiteValueTargets;
+      extractValueTargets(whiteValueTargets, toMoveBot, toMoveBot->rootNode);
+      gameData->whiteValueTargetsByTurn.push_back(whiteValueTargets);
 
-    ValueTargets whiteValueTargets;
-    extractValueTargets(whiteValueTargets, toMoveBot, toMoveBot->rootNode);
-    gameData->whiteValueTargetsByTurn.push_back(whiteValueTargets);
+      if(!recordFullData) {
+        int64_t unreducedNumVisits = toMoveBot->getRootVisits();
+        gameData->policyTargetsByTurn.push_back(PolicyTarget(NULL,unreducedNumVisits));
+      }
+      else {
+        vector<PolicyTargetMove>* policyTarget = new vector<PolicyTargetMove>();
+        int64_t unreducedNumVisits = toMoveBot->getRootVisits();
+        Play::extractPolicyTarget(*policyTarget, toMoveBot, toMoveBot->rootNode, locsBuf, playSelectionValuesBuf);
+        gameData->policyTargetsByTurn.push_back(PolicyTarget(policyTarget,unreducedNumVisits));
+        gameData->nnRawStatsByTurn.push_back(computeNNRawStats(toMoveBot, board, hist, pla));
 
-    if(!recordFullData) {
-      //Go ahead and record this anyways with just the visits, as a bit of a hack so that the sgf output can also write the number of visits.
-      int64_t unreducedNumVisits = toMoveBot->getRootVisits();
-      gameData->policyTargetsByTurn.push_back(PolicyTarget(NULL,unreducedNumVisits));
-    }
-    else {
-      vector<PolicyTargetMove>* policyTarget = new vector<PolicyTargetMove>();
-      int64_t unreducedNumVisits = toMoveBot->getRootVisits();
-      Play::extractPolicyTarget(*policyTarget, toMoveBot, toMoveBot->rootNode, locsBuf, playSelectionValuesBuf);
-      gameData->policyTargetsByTurn.push_back(PolicyTarget(policyTarget,unreducedNumVisits));
-      gameData->nnRawStatsByTurn.push_back(computeNNRawStats(toMoveBot, board, hist, pla));
+        gameData->targetWeightByTurn.push_back(limits.targetWeight);
 
-      gameData->targetWeightByTurn.push_back(limits.targetWeight);
+        double policySurprise = 0.0, policyEntropy = 0.0, searchEntropy = 0.0;
+        bool success = toMoveBot->getPolicySurpriseAndEntropy(policySurprise, searchEntropy, policyEntropy);
+        testAssert(success);
+        (void)success;
+        gameData->policySurpriseByTurn.push_back(policySurprise);
+        gameData->policyEntropyByTurn.push_back(policyEntropy);
+        gameData->searchEntropyByTurn.push_back(searchEntropy);
 
-      double policySurprise = 0.0, policyEntropy = 0.0, searchEntropy = 0.0;
-      bool success = toMoveBot->getPolicySurpriseAndEntropy(policySurprise, searchEntropy, policyEntropy);
-      testAssert(success);
-      (void)success; //Avoid warning when asserts are disabled
-      gameData->policySurpriseByTurn.push_back(policySurprise);
-      gameData->policyEntropyByTurn.push_back(policyEntropy);
-      gameData->searchEntropyByTurn.push_back(searchEntropy);
+        rawNNValues.push_back(toMoveBot->getRootRawNNValuesRequireSuccess());
 
-      rawNNValues.push_back(toMoveBot->getRootRawNNValuesRequireSuccess());
+        Loc sidePositionForkLoc = Board::NULL_LOC;
+        if(playSettings.sidePositionProb > 0.0 && gameRand.nextBool(playSettings.sidePositionProb)) {
+          assert(toMoveBot->rootNode != NULL);
+          const NNOutput* nnOutput = toMoveBot->rootNode->getNNOutput();
+          assert(nnOutput != NULL);
+          Loc banMove = loc;
+          sidePositionForkLoc = chooseRandomForkingMove(nnOutput, board, hist, pla, gameRand, banMove);
+          if(sidePositionForkLoc != Board::NULL_LOC) {
+            SidePosition* sp = new SidePosition(board,hist,pla,(int)gameData->changedNeuralNets.size());
+            sp->hist.makeBoardMoveAssumeLegal(sp->board,sidePositionForkLoc,sp->pla);
+            sp->pla = getOpp(sp->pla);
+            if(sp->hist.isGameFinished) delete sp;
+            else sidePositionsToSearch.push_back(sp);
+          }
+        }
 
-      //Occasionally fork off some positions to evaluate
-      Loc sidePositionForkLoc = Board::NULL_LOC;
-      if(playSettings.sidePositionProb > 0.0 && gameRand.nextBool(playSettings.sidePositionProb)) {
-        assert(toMoveBot->rootNode != NULL);
-        const NNOutput* nnOutput = toMoveBot->rootNode->getNNOutput();
-        assert(nnOutput != NULL);
-        Loc banMove = loc;
-        sidePositionForkLoc = chooseRandomForkingMove(nnOutput, board, hist, pla, gameRand, banMove);
-        if(sidePositionForkLoc != Board::NULL_LOC) {
-          SidePosition* sp = new SidePosition(board,hist,pla,(int)gameData->changedNeuralNets.size());
-          sp->hist.makeBoardMoveAssumeLegal(sp->board,sidePositionForkLoc,sp->pla);
-          sp->pla = getOpp(sp->pla);
-          if(sp->hist.isGameFinished) delete sp;
-          else sidePositionsToSearch.push_back(sp);
+        if(playSettings.recordTreePositions && playSettings.recordTreeTargetWeight > 0.0f) {
+          if(playSettings.recordTreeTargetWeight > 1.0f)
+            throw StringError("playSettings.recordTreeTargetWeight > 1.0f");
+
+          recordTreePositions(
+            gameData,
+            board,hist,pla,
+            toMoveBot,
+            playSettings.recordTreeThreshold,playSettings.recordTreeTargetWeight,
+            (int)gameData->changedNeuralNets.size(),
+            locsBuf,playSelectionValuesBuf,
+            loc,sidePositionForkLoc
+          );
         }
       }
 
-      //If enabled, also record subtree positions from the search as training positions
-      if(playSettings.recordTreePositions && playSettings.recordTreeTargetWeight > 0.0f) {
-        if(playSettings.recordTreeTargetWeight > 1.0f)
-          throw StringError("playSettings.recordTreeTargetWeight > 1.0f");
-
-        recordTreePositions(
-          gameData,
-          board,hist,pla,
-          toMoveBot,
-          playSettings.recordTreeThreshold,playSettings.recordTreeTargetWeight,
-          (int)gameData->changedNeuralNets.size(),
-          locsBuf,playSelectionValuesBuf,
-          loc,sidePositionForkLoc
-        );
+      if(playSettings.allowResignation || playSettings.reduceVisits) {
+        ReportedSearchValues values = toMoveBot->getRootValuesRequireSuccess();
+        historicalMctsWinLossValues.push_back(values.winLossValue);
+        historicalMctsLeads.push_back(values.lead);
+        historicalMctsScoreStdevs.push_back(values.expectedScoreStdev);
       }
-    }
 
-    if(playSettings.allowResignation || playSettings.reduceVisits) {
-      ReportedSearchValues values = toMoveBot->getRootValuesRequireSuccess();
-      historicalMctsWinLossValues.push_back(values.winLossValue);
-      historicalMctsLeads.push_back(values.lead);
-      historicalMctsScoreStdevs.push_back(values.expectedScoreStdev);
-    }
-
-    if(onEachMove != nullptr)
-      onEachMove(board,hist,pla,loc,historicalMctsWinLossValues,historicalMctsLeads,historicalMctsScoreStdevs,toMoveBot);
+      if(onEachMove != nullptr)
+        onEachMove(board,hist,pla,loc,historicalMctsWinLossValues,historicalMctsLeads,historicalMctsScoreStdevs,toMoveBot);
+    } //end MCTS turn
 
     //Finally, make the move on the bots
     bool suc;
@@ -1376,6 +1413,10 @@ FinishedGameData* Play::runGame(
     //And make the move on our copy of the board
     testAssert(hist.isLegal(board,loc,pla));
     hist.makeBoardMoveAssumeLegal(board,loc,pla);
+
+    //Inform external player of the move (both its own genmove responses and NN moves)
+    if(externalPlayer != nullptr && !isExternalTurn)
+      externalPlayer->playMove(loc, pla, board);
 
     //Check for resignation
     if(playSettings.allowResignation && historicalMctsWinLossValues.size() >= playSettings.resignConsecTurns) {
@@ -1907,7 +1948,9 @@ FinishedGameData* GameRunner::runGame(
   const WaitableFlag* shouldPause,
   std::function<NNEvaluator*()> checkForNewNNEval,
   std::function<void(const MatchPairer::BotSpec&, Search*)> afterInitialization,
-  std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove
+  std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove,
+  ExternalPlayer* externalPlayer,
+  Player externalPla
 ) {
   MatchPairer::BotSpec botSpecB = bSpecB;
   MatchPairer::BotSpec botSpecW = bSpecW;
@@ -1974,6 +2017,10 @@ FinishedGameData* GameRunner::runGame(
     }
   }
 
+  //Initialize external player for this game if provided
+  if(externalPlayer != nullptr)
+    externalPlayer->newGame(board.x_size, board.y_size);
+
   FinishedGameData* finishedGameData = Play::runGame(
     board,pla,hist,
     botSpecB,botSpecW,
@@ -1985,7 +2032,9 @@ FinishedGameData* GameRunner::runGame(
     playSettings,otherGameProps,
     gameRand,
     checkForNewNNEval, //Note that if this triggers, botSpecB and botSpecW will get updated, for use in maybeForkGame
-    onEachMove
+    onEachMove,
+    externalPlayer,
+    externalPla
   );
 
   if(initialPosition != NULL) {

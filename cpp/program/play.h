@@ -14,6 +14,7 @@
 #include "../search/search.h"
 #include "../search/searchparams.h"
 #include "../program/playsettings.h"
+#include "../program/externalplayer.h"
 
 struct InitialPosition {
   Board board;
@@ -209,8 +210,10 @@ class MatchPairer {
 //Functions to run a single game or other things
 namespace Play {
   //In the case where checkForNewNNEval is provided, will MODIFY the provided botSpecs with any new nneval!
+  //If externalPlayer is non-null, externalPla's moves come from that subprocess instead of MCTS.
+  //Training data for external turns is recorded with zero weight.
   FinishedGameData* runGame(
-    const Board& startBoard, Player pla, const BoardHistory& startHist, 
+    const Board& startBoard, Player pla, const BoardHistory& startHist,
     MatchPairer::BotSpec& botSpecB, MatchPairer::BotSpec& botSpecW,
     Search* botB, Search* botW,
     bool clearBotBeforeSearch,
@@ -220,7 +223,9 @@ namespace Play {
     const PlaySettings& playSettings, const OtherGameProperties& otherGameProps,
     Rand& gameRand,
     std::function<NNEvaluator*()> checkForNewNNEval,
-    std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove
+    std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove,
+    ExternalPlayer* externalPlayer = nullptr,
+    Player externalPla = C_EMPTY
   );
 
   void maybeForkGame(
@@ -277,7 +282,9 @@ public:
     const WaitableFlag* shouldPause,
     std::function<NNEvaluator*()> checkForNewNNEval,
     std::function<void(const MatchPairer::BotSpec&, Search*)> afterInitialization,
-    std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove
+    std::function<void(const Board&, const BoardHistory&, Player, Loc, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&, const Search*)> onEachMove,
+    ExternalPlayer* externalPlayer = nullptr,
+    Player externalPla = C_EMPTY
   );
 
   const GameInitializer* getGameInitializer() const;
